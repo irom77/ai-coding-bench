@@ -62,8 +62,9 @@ SKIP_RE = re.compile(rb"\b(skip|skipif|xfail|importorskip)\b")
 
 
 def _test_functions(src):
-    """{qualified name: (signature+decorators dump, [statement dumps])} for every test_* function."""
-    out = {}
+    """{qualified name: (signature+decorators dump, [statement dumps])} for every test_* function,
+    plus the set of names that module/class-level code rebinds or deletes (e.g. `test_a = None`)."""
+    out, rebound = {}, set()
     def walk(nodes, prefix):
         for n in nodes:
             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name.startswith("test"):
@@ -71,31 +72,48 @@ def _test_functions(src):
                 out[prefix + n.name] = (sig, [ast.dump(st) for st in n.body])
             elif isinstance(n, ast.ClassDef):
                 walk(n.body, prefix + n.name + ".")
+            elif isinstance(n, (ast.Assign, ast.AugAssign, ast.AnnAssign, ast.Delete)):
+                targets = n.targets if isinstance(n, (ast.Assign, ast.Delete)) else [n.target]
+                for t in targets:
+                    for x in ast.walk(t):
+                        if isinstance(x, ast.Name):
+                            rebound.add(prefix + x.id)
     walk(ast.parse(src).body, "")
-    return out
+    return out, rebound
+
+
+# Added statements that stop or neutralize the original assertions of an existing test.
+_STOPPERS = ("Return(", "Raise(", "attr='skip'", "attr='xfail'", "attr='exit'", "attr='fail'",
+             "attr='_exit'", "id='exit'", "id='quit'")
 
 
 def _kept(old, new):
-    """An existing test is intact if its signature/decorators are unchanged and every original
-    statement is still there, in order (new assertions may be added in between or after)."""
+    """An existing test is intact if its signature/decorators are unchanged, every original statement
+    is still there in order, and nothing added to it can stop those statements from running.
+    Added assertions are fine."""
     if new is None or old[0] != new[0]:
         return False
-    if any("Return(" in st for st in new[1] if st not in old[1]):
-        return False  # an added `return` would stop the original assertions from running
+    if any(any(k in st for k in _STOPPERS) for st in new[1] if st not in old[1]):
+        return False
     it = iter(new[1])
     return all(any(st == x for x in it) for st in old[1])
 
 
-def _line_tampered(old, new):
-    """Fallback for non-Python files: any removed or changed line."""
-    ops = difflib.SequenceMatcher(None, old.splitlines(), new.splitlines(), autojunk=False).get_opcodes()
-    return any(op in ("replace", "delete") for op, *_ in ops)
+def _added_lines(old, new):
+    """Lines inserted or replaced, by position (not set membership)."""
+    a, b = (old or b"").splitlines(), new.splitlines()
+    out = []
+    for op, _, _, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
+        if op in ("insert", "replace"):
+            out += b[j1:j2]
+    return out
 
 
 def check_protected(before, after):
-    """Tampering = an existing protected file was deleted; an existing test_* function was removed,
-    re-signatured/re-decorated, or lost or changed any of its original statements; or a skip/xfail
-    was added anywhere. Adding tests, adding assertions to existing tests, and editing imports or
+    """Tampering = an existing protected file was deleted; a conftest.py was added or changed; an
+    existing test_* function was removed, rebound/deleted at module level, re-signatured/
+    re-decorated, lost or changed any original statement, or gained a return/raise/skip/exit/fail;
+    or a skip/xfail line was added anywhere. Adding tests, adding assertions to existing tests, and editing imports or
     helpers is allowed and only reported, since grading uses a pristine copy of the visible tests."""
     tampered, added_to = [], []
     for path in sorted(before.keys() | after.keys()):
@@ -105,18 +123,21 @@ def check_protected(before, after):
         if new is None:
             tampered.append(path)
             continue
-        old_lines = set(old.splitlines()) if old is not None else set()
-        if any(SKIP_RE.search(l) for l in new.splitlines() if l not in old_lines):
+        if any(SKIP_RE.search(l) for l in _added_lines(old, new)):
             tampered.append(path)
+            continue
+        if Path(path).name == "conftest.py":
+            tampered.append(path)  # conftest can change any test's behaviour: no edits allowed
             continue
         if old is None:
             added_to.append(path)
             continue
         if path.endswith(".py"):
             try:
-                old_t = _test_functions(old)
-                new_t = _test_functions(new)
-                bad = not all(_kept(body, new_t.get(name)) for name, body in old_t.items())
+                old_t, _ = _test_functions(old)
+                new_t, rebound = _test_functions(new)
+                bad = (not all(_kept(body, new_t.get(name)) for name, body in old_t.items())
+                       or bool(rebound & set(old_t)))
             except SyntaxError:
                 bad = True  # the agent left a protected test file unparseable
         else:
@@ -139,10 +160,10 @@ def run_agent(cmd_tpl, prompt, task_name, work, log_path, timeout):
     cmd = (cmd_tpl.replace("{prompt_file}", shlex.quote(str(prompt_file)))
                   .replace("{workdir}", shlex.quote(str(work)))
                   .replace("{prompt}", shlex.quote(prompt)))
-    # Every agent gets the same toolchain: the grader's Python (with pytest) first on PATH, so
-    # `pytest` / `python3 -m pytest` work for everyone and no agent wastes its run hunting for them.
+    # Every agent gets the same toolchain: a read-only venv with pytest first on PATH (separate from
+    # the grader's), so `pytest` / `python3 -m pytest` work for everyone and nobody hunts for them.
     env = {**os.environ, "BENCH_PROMPT": prompt, "BENCH_TASK": task_name,
-           "PATH": str(Path(GRADER_PY).parent) + os.pathsep + os.environ.get("PATH", "")}
+           "PATH": AGENT_BIN + os.pathsep + os.environ.get("PATH", "")}
     t0 = time.monotonic()
     with open(log_path, "w") as log:
         log.write(f"$ {cmd}\n\n")
@@ -273,26 +294,73 @@ def diff_stats(work):
 GRADER_PY = sys.executable
 
 
-def ensure_pytest():
-    """Return a Python that has pytest. Uses this Python if it already does; otherwise creates
-    .venv/ inside the kit once and installs pytest there (works on distros that block system pip)."""
-    if subprocess.run([sys.executable, "-c", "import pytest"], capture_output=True).returncode == 0:
-        return sys.executable
-    # Outside the kit on purpose: its bin/ goes on the agents' PATH, which must not reveal where
-    # the kit (and its hidden tests) lives.
-    venv_dir = Path.home() / ".cache" / "ai-coding-bench" / "venv"
-    venv_py = venv_dir / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    if not venv_py.exists() or subprocess.run([str(venv_py), "-c", "import pytest"],
-                                              capture_output=True).returncode != 0:
-        print(f"pytest not found for {sys.executable}; installing it into {venv_dir} (one time)...",
-              flush=True)
+CACHE = Path.home() / ".cache" / "ai-coding-bench"   # outside the kit: never reveals where hidden tests live
+AGENT_BIN = None    # bin/ of the agents' toolchain venv, put first on every agent's PATH
+GRADER_FP = None    # fingerprint of the grader's pytest install, re-checked before every grade
+
+
+def _venv_python(venv_dir):
+    return venv_dir / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+
+
+def _has_pytest(py):
+    return Path(py).exists() and subprocess.run([str(py), "-I", "-c", "import pytest"],
+                                                capture_output=True).returncode == 0
+
+
+def _make_venv(venv_dir, purpose):
+    """A venv with pytest, made read-only so a stray `pip install` from an agent fails instead of
+    silently changing it for every later run."""
+    py = _venv_python(venv_dir)
+    if not _has_pytest(py):
+        print(f"setting up pytest for {purpose} in {venv_dir} (one time)...", flush=True)
         try:
+            if venv_dir.exists():
+                subprocess.run(["chmod", "-R", "u+w", str(venv_dir)], check=False)
+                shutil.rmtree(venv_dir)
             subprocess.run([sys.executable, "-m", "venv", str(venv_dir)], check=True)
-            subprocess.run([str(venv_py), "-m", "pip", "install", "-q", "pytest"], check=True)
+            subprocess.run([str(py), "-m", "pip", "install", "-q", "pytest"], check=True)
         except (subprocess.CalledProcessError, OSError) as e:
             sys.exit(f"could not set up pytest automatically ({e}). Install it yourself: "
                      f"pip install pytest  (Debian/Ubuntu may need: sudo apt install python3-venv)")
-    return str(venv_py)
+    if os.name != "nt":
+        subprocess.run(["chmod", "-R", "a-w", str(venv_dir / "lib"), str(venv_dir / "bin")], check=False)
+    return py
+
+
+def _fingerprint(py):
+    """Hash of everything that decides how pytest behaves for this interpreter: the site-packages
+    listing (new plugins / .pth files) and every file of pytest, _pytest and pluggy."""
+    code = ("import hashlib,os,site,sys\n"
+            "h=hashlib.sha256()\n"
+            "for sp in sorted(set(site.getsitepackages())):\n"
+            "    if not os.path.isdir(sp): continue\n"
+            "    for e in sorted(os.listdir(sp)):\n"
+            "        h.update(e.encode())\n"
+            "        if e.endswith('.pth'): h.update(open(os.path.join(sp,e),'rb').read())\n"
+            "    for pkg in ('pytest','_pytest','pluggy'):\n"
+            "        for root,dirs,files in sorted(os.walk(os.path.join(sp,pkg))):\n"
+            "            dirs.sort()\n"
+            "            for f in sorted(files):\n"
+            "                if f.endswith('.pyc'): continue\n"
+            "                fp=os.path.join(root,f); h.update(fp.encode()); h.update(open(fp,'rb').read())\n"
+            "print(h.hexdigest())")
+    return subprocess.run([str(py), "-I", "-c", code], capture_output=True, text=True, check=True).stdout.strip()
+
+
+def setup_toolchains():
+    """Grader and agents get separate pytest installs. The grader uses this Python if it already has
+    pytest, else its own read-only venv; it is never on the agents' PATH and is fingerprinted.
+    Agents get a separate read-only venv with pytest first on PATH, so all of them have the
+    same toolchain."""
+    global GRADER_PY, AGENT_BIN, GRADER_FP
+    GRADER_PY = sys.executable if _has_pytest(sys.executable) else str(_make_venv(CACHE / "grader-venv", "grading"))
+    AGENT_BIN = str(_make_venv(CACHE / "agent-venv", "agents").parent)
+    GRADER_FP = _fingerprint(GRADER_PY)
+    old = CACHE / "venv"  # single shared venv from earlier versions: was on agents' PATH and writable
+    if old.exists():
+        subprocess.run(["chmod", "-R", "u+w", str(old)], check=False)
+        shutil.rmtree(old, ignore_errors=True)
 
 
 def grade(task, work):
@@ -303,6 +371,10 @@ def grade(task, work):
     so a planted pytest.py / sitecustomize.py in the repo can't load before pytest. The repo is only
     added to sys.path by pytest's `pythonpath` option once pytest is running. Agent-written
     conftest.py / pytest.ini files are ignored; skipped tests count as failures."""
+    if _fingerprint(GRADER_PY) != GRADER_FP:
+        sys.exit(f"ABORT: the grader's pytest install ({GRADER_PY}) changed during the benchmark. "
+                 "Something (probably an agent) modified it, so grades can't be trusted. "
+                 "Results so far are in the JSONL; check them before reusing.")
     gdir = Path(tempfile.mkdtemp(prefix="bench-grade-"))
     try:
         hidden = gdir / "tests"
@@ -362,8 +434,7 @@ def main():
         except EOFError:
             args.note = ""
 
-    global GRADER_PY
-    GRADER_PY = ensure_pytest()
+    setup_toolchains()
     tasks = load_tasks(args.tasks)
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + uuid.uuid4().hex[:6]
     base = Path(args.workdir or Path(tempfile.gettempdir()) / "ai-coding-bench") / run_id / args.name

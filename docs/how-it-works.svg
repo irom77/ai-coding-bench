@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 460" width="960" height="460" role="img" aria-labelledby="t d">
+  <title id="t">How a harness is benchmarked</title>
+  <desc id="d">Six steps: the same task goes to a fresh workspace, the harness works on it, the runner checks for tampering, grades with hidden tests, and records results on the leaderboard.</desc>
+  <style>
+    :root {
+      --bg: #ffffff; --card: #f6f8fa; --stroke: #d0d7de; --text: #1f2328; --muted: #59636e;
+      --accent: #0969da; --accent-soft: #ddf4ff; --lock: #1a7f37; --lock-soft: #dafbe1;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0d1117; --card: #161b22; --stroke: #30363d; --text: #e6edf3; --muted: #9198a1;
+        --accent: #4493f8; --accent-soft: #0c2d6b; --lock: #3fb950; --lock-soft: #0f3d1f;
+      }
+    }
+    .bg { fill: var(--bg); }
+    .card { fill: var(--card); stroke: var(--stroke); stroke-width: 1.5; }
+    .card-accent { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 2; }
+    .card-lock { fill: var(--lock-soft); stroke: var(--lock); stroke-width: 2; }
+    .badge { fill: var(--text); }
+    .badge-accent { fill: var(--accent); }
+    .badge-lock { fill: var(--lock); }
+    .num { fill: var(--bg); font: 700 14px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; text-anchor: middle; }
+    .h { fill: var(--text); font: 700 18px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .p { fill: var(--muted); font: 400 13.5px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .title { fill: var(--text); font: 700 22px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+    .foot { fill: var(--muted); font: 500 13.5px system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; text-anchor: middle; }
+    .arrow { stroke: var(--muted); stroke-width: 2; fill: none; marker-end: url(#head); }
+    .head { fill: var(--muted); }
+  </style>
+  <defs>
+    <marker id="head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path class="head" d="M0,0 L10,5 L0,10 z"/>
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="960" height="460" rx="16"/>
+  <text class="title" x="30" y="44">How a harness is benchmarked</text>
+
+  <!-- Row 1: left to right -->
+  <g>
+    <rect class="card" x="30" y="72" width="260" height="128" rx="12"/>
+    <circle class="badge" cx="58" cy="102" r="14"/><text class="num" x="58" y="107">1</text>
+    <text class="h" x="82" y="108">Task</text>
+    <text class="p" x="50" y="140">Prompt + starter repo</text>
+    <text class="p" x="50" y="162">identical for every harness</text>
+    <text class="p" x="50" y="184">visible tests are protected</text>
+  </g>
+  <g>
+    <rect class="card" x="350" y="72" width="260" height="128" rx="12"/>
+    <circle class="badge" cx="378" cy="102" r="14"/><text class="num" x="378" y="107">2</text>
+    <text class="h" x="402" y="108">Fresh workspace</text>
+    <text class="p" x="370" y="140">Temp copy outside the kit</text>
+    <text class="p" x="370" y="162">git baseline commit</text>
+    <text class="p" x="370" y="184">pytest on PATH for everyone</text>
+  </g>
+  <g>
+    <rect class="card-accent" x="670" y="72" width="260" height="128" rx="12"/>
+    <circle class="badge-accent" cx="698" cy="102" r="14"/><text class="num" x="698" y="107">3</text>
+    <text class="h" x="722" y="108">Harness works</text>
+    <text class="p" x="690" y="140">CLI, IDE chat or wrapper</text>
+    <text class="p" x="690" y="162">Claude Code, Codex, Gemini…</text>
+    <text class="p" x="690" y="184">timeout, killed when done</text>
+  </g>
+
+  <!-- Row 2: right to left -->
+  <g>
+    <rect class="card" x="670" y="264" width="260" height="128" rx="12"/>
+    <circle class="badge" cx="698" cy="294" r="14"/><text class="num" x="698" y="299">4</text>
+    <text class="h" x="722" y="300">Checks</text>
+    <text class="p" x="690" y="332">Tests weakened or deleted?</text>
+    <text class="p" x="690" y="354">Infra error? Right model?</text>
+    <text class="p" x="690" y="376">diff size, time, cost</text>
+  </g>
+  <g>
+    <rect class="card-lock" x="350" y="264" width="260" height="128" rx="12"/>
+    <circle class="badge-lock" cx="378" cy="294" r="14"/><text class="num" x="378" y="299">5</text>
+    <text class="h" x="402" y="300">Grading</text>
+    <text class="p" x="370" y="332">Hidden tests, never shown</text>
+    <text class="p" x="370" y="354">+ pristine visible tests</text>
+    <text class="p" x="370" y="376">isolated, fingerprinted pytest</text>
+  </g>
+  <g>
+    <rect class="card" x="30" y="264" width="260" height="128" rx="12"/>
+    <circle class="badge" cx="58" cy="294" r="14"/><text class="num" x="58" y="299">6</text>
+    <text class="h" x="82" y="300">Leaderboard</text>
+    <text class="p" x="50" y="332">Pass rate + 95% interval</text>
+    <text class="p" x="50" y="354">results.jsonl → LEADERBOARD.md</text>
+    <text class="p" x="50" y="376">every run kept, reproducible</text>
+  </g>
+
+  <!-- Arrows -->
+  <path class="arrow" d="M292,136 L346,136"/>
+  <path class="arrow" d="M612,136 L666,136"/>
+  <path class="arrow" d="M800,202 L800,260"/>
+  <path class="arrow" d="M668,328 L614,328"/>
+  <path class="arrow" d="M348,328 L294,328"/>
+
+  <text class="foot" x="480" y="432">× 3 repeats per task · 6 runs in parallel · same prompt, same repo, same grader for every harness</text>
+</svg>

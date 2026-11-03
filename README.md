@@ -1,10 +1,12 @@
 # ai-coding-bench
 
+<p align="center"><img src="docs/how-it-works.svg" alt="How a harness is benchmarked: 1 task, 2 fresh workspace, 3 harness works, 4 checks, 5 hidden-test grading, 6 leaderboard" width="900"></p>
+
 A small, honest benchmark for comparing AI coding assistants on the same tasks under the same conditions.
 It works with any agent you can run from a shell command, and with IDE/chat agents driven by hand.
-**Current results: [LEADERBOARD.md](LEADERBOARD.md).**
+**Current results: [LEADERBOARD.md](LEADERBOARD.md)** · **Next: harder tasks, see [TODO.md](TODO.md).**
 
-Requires Python 3.9+ and git. If your Python has no pytest, the runner installs it once into `~/.cache/ai-coding-bench/venv`. That Python (with pytest) is put first on every agent's PATH, so all agents get the same toolchain and `pytest` just works.
+Requires Python 3.9+ and git. pytest is set up automatically in `~/.cache/ai-coding-bench/`: agents get their own read-only venv with pytest first on `PATH`, so all of them have the same toolchain and `pytest` just works. The grader uses your Python if it already has pytest, otherwise a separate read-only venv that agents never see on `PATH`. Its pytest install is fingerprinted, and the run aborts if anything changes it.
 
 ## How it works
 
@@ -12,7 +14,7 @@ For every task and repeat, the runner:
 
 1. copies the task's starter repo into a fresh temp dir (outside this kit, so the agent can't see hidden tests) and makes a baseline git commit;
 2. runs your agent command inside it with the task prompt;
-3. checks whether protected files (the visible tests) were tampered with: a test file deleted, an existing `test_*` function removed, its signature or decorators changed, any of its original statements changed or removed, a `return` added to it, or a skip/xfail added anywhere. Adding tests, adding assertions to existing tests and editing imports or helpers is allowed and only reported (`tests_added_to`);
+3. checks whether protected files (the visible tests) were tampered with: a test file deleted, a `conftest.py` added or changed, an existing `test_*` function removed or rebound, its signature or decorators changed, any of its original statements changed or removed, a `return`/`raise`/`pytest.skip`/`exit`/`fail` added to it, or a skip/xfail line added anywhere. Adding tests, adding assertions to existing tests and editing imports or helpers is allowed and only reported (`tests_added_to`);
 4. grades with **hidden tests** plus a pristine copy of the visible tests. Agent-written `conftest.py` and `pytest.ini` files are ignored, and skipped tests count as failures;
 5. records pass/fail, partial score, time, diff size, tampering, infra errors, agent-reported cost, and the requested vs. reported model to `results/results.jsonl`.
 
@@ -51,7 +53,7 @@ with `gemini-3.6-flash`; 0.66 fixed it (the model check below catches this).
 | `{prompt_file}` | path to a file containing the prompt         |
 | `{workdir}`     | absolute path of the task repo               |
 
-The env vars `BENCH_PROMPT` and `BENCH_TASK` are also set, and the grader's Python (with pytest) is first on `PATH`. Example command shapes for other CLIs (check the flags against your installed version):
+The env vars `BENCH_PROMPT` and `BENCH_TASK` are also set, and the agents' read-only Python (with pytest) is first on `PATH`. Example command shapes for other CLIs (check the flags against your installed version):
 
 ```bash
 --agent 'aider --yes-always --no-auto-commits --model <model> --message {prompt}'
@@ -123,7 +125,7 @@ Each task folder contains `task.json` (prompt, difficulty, protected paths), `re
 - **pass** is the main number. The **95% CI** is a Wilson interval. If two models' intervals overlap heavily, you haven't shown a difference yet, so add runs or tasks.
 - **INFRA** runs: the agent exited with an error and changed nothing (billing, auth, rate limit, wrong flag). They are recorded with `infra_error: true` but left out of every score; `report.py` lists how many were excluded. Fix the cause and rerun.
 - **tests%** gives partial credit and is useful for spotting "almost right" versus "lost".
-- **tamper**: the model deleted a protected test file, removed an existing test, changed or dropped any of its original statements, added a `return` to it, or added a skip/xfail. Treat this as a red flag, not just a fail. Adding tests, adding assertions to existing tests and editing imports or helpers is *not* tampering (grading uses a pristine copy of the visible tests, so these edits can't help); those files are listed in `tests_added_to`.
+- **tamper**: the model deleted a protected test file, added or changed a `conftest.py`, removed or rebound an existing test, changed or dropped any of its original statements, added something that stops it early (`return`, `raise`, `pytest.skip`/`exit`/`fail`), or added a skip/xfail. Treat this as a red flag, not just a fail. Adding tests, adding assertions to existing tests and editing imports or helpers is *not* tampering (grading uses a pristine copy of the visible tests, so these edits can't help); those files are listed in `tests_added_to`.
 - **med s** and **med +/-** are wall-clock time and diff size. Large diffs on small tasks usually mean collateral edits.
 - **cont** is the median number of "continue" follow-ups per run (manual mode only, 0 for CLI agents). A pass that needed continues is still a pass, but a higher number means the agent needed more pushing to finish.
 - **gave** is the number of runs you abandoned with `g`. Those runs are graded as they stood.
@@ -135,7 +137,7 @@ For quality beyond pass/fail, open the `workdir` of a few runs and compare `git 
 
 ## Adding your own tasks (recommended)
 
-Six toy tasks are a smoke test. The real signal comes from 15–30 tasks taken from your own code:
+Six toy tasks are a smoke test. The real signal comes from 15–30 tasks taken from your own code. [TODO.md](TODO.md) lists the harder task types planned next:
 
 1. Create `tasks/NN_name/` with `task.json`, `repo/`, `hidden/` and `solution/`.
 2. A good source is a past bug-fix commit: the code before the fix goes in `repo/`, the tests added by the fix go in `hidden/`, and the fixed files go in `solution/`.
@@ -151,6 +153,6 @@ Aim for a mix of roughly 1/3 easy, 1/3 medium and 1/3 hard.
 - Keep everything else identical between models: harness, system prompt, tools, timeout.
 - This repo is public, so the six bundled tasks, their hidden tests and solutions may end up in model training data. Use them to check the setup; for a real ranking use your own tasks kept in a private repo or folder.
 - Hidden tests live in this folder. An agent with full disk access could go looking for them, so for strict isolation run agents in a container or VM and keep the kit outside it.
-- The grader is hardened against common tricks. It runs isolated Python (`-I`) from a fresh temp dir, so a planted `pytest.py`, `sitecustomize.py` or fake `junit.xml` has no effect, and it kills the agent's whole process session before checking and grading, so leftover background jobs can't change files afterwards. It still trusts the code under test: a solution that patches pytest when imported, or a process that escapes with `setsid`, can only be stopped by running agents in a container or VM.
+- The grader is hardened against common tricks. It runs isolated Python (`-I`) from a fresh temp dir, so a planted `pytest.py`, `sitecustomize.py` or fake `junit.xml` has no effect. Its pytest install is separate from the agents' venv, read-only, and fingerprinted before every grade, so a `pip install` by an agent can't change grading. The benchmark aborts if it changes. The grader also kills the agent's whole process session before checking and grading, so leftover background jobs can't change files afterwards. It still trusts the code under test: a solution that patches pytest when imported, or a process that escapes with `setsid`, can only be stopped by running agents in a container or VM.
 - Parallel runs (`--jobs` > 1) all run as your user, so a misbehaving agent could read or change another run's files while it is being graded. For a strict run, use `--jobs 1` or, better, run each agent in a container or as a separate user.
 - Tasks are Python/pytest. For other languages, keep the same layout and change the grading command in `grade()` in `run.py`.
