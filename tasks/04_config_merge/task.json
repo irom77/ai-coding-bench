@@ -1,0 +1,6 @@
+{
+  "title": "Nested config merge loses keys and mutates defaults",
+  "difficulty": "medium",
+  "prompt": "Bug report: if a user's override is {\"database\": {\"port\": 6543}}, database.host from the defaults disappears. Also, loading the config twice in one process gives different results. Fix the appconfig package so that: nested dicts merge recursively at any depth; any non-dict value in the override (including lists and None) replaces the default value; neither the defaults nor the overrides are ever mutated; and the returned config shares no mutable objects with the defaults or overrides.",
+  "protected": ["tests"]
+}

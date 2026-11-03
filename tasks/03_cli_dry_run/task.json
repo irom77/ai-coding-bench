@@ -1,0 +1,6 @@
+{
+  "title": "Add --dry-run to a multi-file CLI",
+  "difficulty": "medium",
+  "prompt": "Add a --dry-run flag to the `cleaner` CLI (cleaner/cli.py and the modules it uses). With --dry-run it must delete nothing; for each file that would be deleted print `would delete: <path>` (same paths and order as normal mode), then a final line `would delete N files`, and return 0. It must work together with --pattern and --older-than. Normal-mode output and behaviour must not change. All output goes to the `out` stream passed to main().",
+  "protected": ["tests"]
+}

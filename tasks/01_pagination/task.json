@@ -1,0 +1,6 @@
+{
+  "title": "Off-by-one pagination bugs",
+  "difficulty": "easy",
+  "prompt": "Users report two bugs in pager.py: page 1 skips the first items, and total_pages() drops the last partial page. Fix them. Pages are 1-indexed. Both functions must raise ValueError if per_page < 1, and paginate() must raise ValueError if page < 1. A page past the end returns an empty list.",
+  "protected": ["tests"]
+}

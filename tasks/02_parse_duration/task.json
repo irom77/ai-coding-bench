@@ -1,0 +1,6 @@
+{
+  "title": "Combined duration parsing with a misleading error",
+  "difficulty": "easy",
+  "prompt": "parse_duration('1h30m') fails with a confusing 'invalid unit: h30m' error. Make parse_duration in durations.py accept combined durations such as '1h30m', '2d4h' or '1h30m15s' (units d, h, m, s; return total seconds as an int; leading/trailing whitespace is allowed). Anything malformed - empty string, unknown unit, a number with no unit, a unit with no number - must raise ValueError.",
+  "protected": ["tests"]
+}

@@ -1,0 +1,6 @@
+{
+  "title": "Implement a token-bucket rate limiter from a spec",
+  "difficulty": "medium",
+  "prompt": "Implement the TokenBucket class in ratelimit.py according to the specification in its docstring. Keep the public API exactly as specified. Add tests if you like.",
+  "protected": ["tests/test_ratelimit.py"]
+}

@@ -1,0 +1,6 @@
+{
+  "title": "Make failing tests pass without touching tests",
+  "difficulty": "easy",
+  "prompt": "The tests in tests/test_stats.py are failing. Fix stats.py so they pass. Do not modify, delete, skip or add test files: the tests are the specification.",
+  "protected": ["tests"]
+}
