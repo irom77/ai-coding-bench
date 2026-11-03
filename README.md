@@ -132,4 +132,5 @@ Aim for a mix of roughly 1/3 easy, 1/3 medium and 1/3 hard.
 - Use at least 3 runs per task, because agents are non-deterministic.
 - Keep everything else identical between models: harness, system prompt, tools, timeout.
 - Hidden tests live in this folder. An agent with full disk access could go looking for them, so for strict isolation run agents in a container or VM and keep the kit outside it.
+- The grader is hardened against common tricks. It runs isolated Python (`-I`) from a fresh temp dir, so a planted `pytest.py`, `sitecustomize.py` or fake `junit.xml` has no effect, and it kills the agent's whole process session before checking and grading, so leftover background jobs can't change files afterwards. It still trusts the code under test: a solution that patches pytest when imported, or a process that escapes with `setsid`, can only be stopped by running agents in a container or VM.
 - Tasks are Python/pytest. For other languages, keep the same layout and change the grading command in `grade()` in `run.py`.

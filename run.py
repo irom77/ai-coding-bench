@@ -116,9 +116,15 @@ def run_agent(cmd_tpl, prompt, task_name, work, log_path, timeout):
             rc = proc.wait(timeout=timeout)
             timed_out = False
         except subprocess.TimeoutExpired:
-            os.killpg(proc.pid, signal.SIGKILL)
-            proc.wait()
             rc, timed_out = None, True
+        finally:
+            # Always kill the whole session, so background processes the agent left behind
+            # can't keep changing files while we check and grade them.
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
+            proc.wait()
     return rc, timed_out, round(time.monotonic() - t0, 2)
 
 
@@ -211,33 +217,40 @@ def ensure_pytest():
 
 def grade(task, work):
     """Run the hidden tests plus a pristine copy of the visible tests.
-    Agent-written conftest.py / pytest.ini files are ignored; skipped tests count as failures."""
-    hidden = work / "_bench_hidden_tests"
-    if hidden.exists():
-        shutil.rmtree(hidden)
-    shutil.copytree(task / "hidden", hidden)
-    if (task / "repo" / "tests").is_dir():
-        shutil.copytree(task / "repo" / "tests", hidden / "_visible")
-    junit = work.parent / "junit.xml"
-    env = {**os.environ, "PYTHONPATH": str(work), "PYTHONDONTWRITEBYTECODE": "1"}
-    cmd = [GRADER_PY, "-m", "pytest", "-q", "-p", "no:cacheprovider", "--noconftest",
-           "-c", str(ROOT / "grader.ini"), "--rootdir", str(work),
-           "--import-mode=importlib", f"--junitxml={junit}", str(hidden)]
+
+    Hardened against an agent gaming the grader: tests and the junit report live in a fresh temp dir
+    the agent never saw; Python runs isolated (-I: no PYTHONPATH, no user site, no cwd on sys.path),
+    so a planted pytest.py / sitecustomize.py in the repo can't load before pytest. The repo is only
+    added to sys.path by pytest's `pythonpath` option once pytest is running. Agent-written
+    conftest.py / pytest.ini files are ignored; skipped tests count as failures."""
+    gdir = Path(tempfile.mkdtemp(prefix="bench-grade-"))
     try:
-        proc = subprocess.run(cmd, cwd=work, env=env, capture_output=True, text=True, timeout=180)
-        output = proc.stdout + proc.stderr
-    except subprocess.TimeoutExpired:
-        return {"tests": 0, "passed": 0, "score": 0.0, "test_output": "grader timed out"}
-    (work.parent / "grade.log").write_text(output)
-    shutil.rmtree(hidden, ignore_errors=True)
-    tests = failed = 0
-    if junit.exists():
-        for suite in ET.parse(junit).getroot().iter("testsuite"):
-            tests += int(suite.get("tests", 0))
-            failed += sum(int(suite.get(k, 0)) for k in ("failures", "errors", "skipped"))
-    passed = tests - failed
-    return {"tests": tests, "passed": passed, "score": round(passed / tests, 3) if tests else 0.0,
-            "test_output": output[-2000:]}
+        hidden = gdir / "tests"
+        shutil.copytree(task / "hidden", hidden)
+        if (task / "repo" / "tests").is_dir():
+            shutil.copytree(task / "repo" / "tests", hidden / "_visible")
+        junit = gdir / "junit.xml"
+        env = {k: v for k, v in os.environ.items() if not k.startswith("PYTHON")}
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        cmd = [GRADER_PY, "-I", "-m", "pytest", "-q", "-p", "no:cacheprovider", "--noconftest",
+               "-c", str(ROOT / "grader.ini"), "--rootdir", str(gdir), "-o", f"pythonpath={work}",
+               "--import-mode=importlib", f"--junitxml={junit}", str(hidden)]
+        try:
+            proc = subprocess.run(cmd, cwd=gdir, env=env, capture_output=True, text=True, timeout=180)
+            output = proc.stdout + proc.stderr
+        except subprocess.TimeoutExpired:
+            return {"tests": 0, "passed": 0, "score": 0.0, "test_output": "grader timed out"}
+        (work.parent / "grade.log").write_text(output)
+        tests = failed = 0
+        if junit.exists():
+            for suite in ET.parse(junit).getroot().iter("testsuite"):
+                tests += int(suite.get("tests", 0))
+                failed += sum(int(suite.get(k, 0)) for k in ("failures", "errors", "skipped"))
+        passed = tests - failed
+        return {"tests": tests, "passed": passed, "score": round(passed / tests, 3) if tests else 0.0,
+                "test_output": output[-2000:]}
+    finally:
+        shutil.rmtree(gdir, ignore_errors=True)
 
 
 def main():
