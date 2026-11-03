@@ -315,7 +315,12 @@ def main():
         tampered, tests_added_to = check_protected(before, snapshot_paths(work, protected))
         diff = diff_stats(work)
         g = grade(task, work)
-        passed = g["tests"] > 0 and g["passed"] == g["tests"] and not tampered
+        # The agent exited with an error and changed nothing: almost always the provider or the harness
+        # failing (billing, auth, rate limit, bad flag), not the model trying and failing. Recorded,
+        # but left out of the scores by report.py.
+        infra_error = (not args.manual and not timed_out and rc not in (0, None)
+                       and not diff["files_changed"])
+        passed = g["tests"] > 0 and g["passed"] == g["tests"] and not tampered and not infra_error
         result = {
             "run_id": run_id, "agent": args.name, "agent_cmd": args.agent, "task": task.name,
             "mode": "manual" if args.manual else "cli", "agent_note": args.note,
@@ -324,7 +329,7 @@ def main():
             "difficulty": spec.get("difficulty"), "repeat": r, "pass": passed,
             "score": g["score"], "tests_passed": g["passed"], "tests_total": g["tests"],
             "tampered_files": tampered, "tests_added_to": tests_added_to, "timed_out": timed_out,
-            "exit_code": rc, "seconds": secs, "cost_usd": read_cost(run_dir / "agent.log"),
+            "exit_code": rc, "infra_error": infra_error, "seconds": secs, "cost_usd": read_cost(run_dir / "agent.log"),
             **diff, "workdir": str(work), "log": str(run_dir / "agent.log"),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
@@ -334,11 +339,12 @@ def main():
         if timed_out: notes.append("TIMEOUT")
         if followups: notes.append(f"continues={len(followups)}")
         if gave_up: notes.append("GAVE_UP")
+        if infra_error: notes.append(f"INFRA_ERROR exit {rc}, nothing changed; excluded from scores, see agent.log")
         if result["cost_usd"] is not None: notes.insert(0, f"${result['cost_usd']:.2f}")
         with lock:
             with open(results_path, "a") as f:
                 f.write(json.dumps(result) + "\n")
-            print(f"[{'PASS' if passed else 'FAIL'}] {task.name:<24} r{r}  tests {g['passed']}/{g['tests']}  "
+            print(f"[{'INFRA' if infra_error else 'PASS' if passed else 'FAIL'}] {task.name:<24} r{r}  tests {g['passed']}/{g['tests']}  "
                   f"{secs:>7.1f}s  +{diff['lines_added']}/-{diff['lines_removed']}  {' '.join(notes)}",
                   flush=True)
 

@@ -105,6 +105,7 @@ Each task folder contains `task.json` (prompt, difficulty, protected paths), `re
 ## Reading the report
 
 - **pass** is the main number. The **95% CI** is a Wilson interval. If two models' intervals overlap heavily, you haven't shown a difference yet, so add runs or tasks.
+- **INFRA** runs: the agent exited with an error and changed nothing (billing, auth, rate limit, wrong flag). They are recorded with `infra_error: true` but left out of every score; `report.py` lists how many were excluded. Fix the cause and rerun.
 - **tests%** gives partial credit and is useful for spotting "almost right" versus "lost".
 - **tamper**: the model deleted a protected test file, removed or changed lines in one, or added a skip/xfail. Treat this as a red flag, not just a fail. Appending new tests or adding new test files is *not* tampering (grading uses a pristine copy of the visible tests, so additions can't help); those files are listed in `tests_added_to`.
 - **med s** and **med +/-** are wall-clock time and diff size. Large diffs on small tasks usually mean collateral edits.
