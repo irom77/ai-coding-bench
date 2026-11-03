@@ -1,7 +1,7 @@
 # ai-coding-bench
 
 A small, honest benchmark for comparing AI coding assistants on the same tasks under the same conditions.
-It works with any agent you can run from a shell command. Requires Python 3.9+ and git. If your Python has no pytest, the runner installs it once into `.venv/` inside the kit.
+It works with any agent you can run from a shell command. Requires Python 3.9+ and git. If your Python has no pytest, the runner installs it once into `~/.cache/ai-coding-bench/venv`. That Python (with pytest) is put first on every agent's PATH, so all agents get the same toolchain and `pytest` just works.
 
 ## How it works
 
@@ -9,7 +9,7 @@ For every task and repeat, the runner:
 
 1. copies the task's starter repo into a fresh temp dir (outside this kit, so the agent can't see hidden tests) and makes a baseline git commit;
 2. runs your agent command inside it with the task prompt;
-3. checks whether protected files (the visible tests) were tampered with: deleted, lines removed or changed, or skip/xfail added. Purely *adding* tests is allowed and only reported (`tests_added_to`);
+3. checks whether protected files (the visible tests) were tampered with: a test file deleted, an existing `test_*` function removed or any of its original statements changed or removed, a `return` added to one, or a skip/xfail added. Adding tests, adding assertions to existing tests and editing imports or helpers is allowed and only reported (`tests_added_to`);
 4. grades with **hidden tests** plus a pristine copy of the visible tests. Agent-written `conftest.py` and `pytest.ini` files are ignored, and skipped tests count as failures;
 5. records pass/fail, partial score, time, diff size and tampering to `results/results.jsonl`.
 
@@ -107,7 +107,7 @@ Each task folder contains `task.json` (prompt, difficulty, protected paths), `re
 - **pass** is the main number. The **95% CI** is a Wilson interval. If two models' intervals overlap heavily, you haven't shown a difference yet, so add runs or tasks.
 - **INFRA** runs: the agent exited with an error and changed nothing (billing, auth, rate limit, wrong flag). They are recorded with `infra_error: true` but left out of every score; `report.py` lists how many were excluded. Fix the cause and rerun.
 - **tests%** gives partial credit and is useful for spotting "almost right" versus "lost".
-- **tamper**: the model deleted a protected test file, removed or changed lines in one, or added a skip/xfail. Treat this as a red flag, not just a fail. Appending new tests or adding new test files is *not* tampering (grading uses a pristine copy of the visible tests, so additions can't help); those files are listed in `tests_added_to`.
+- **tamper**: the model deleted a protected test file, removed an existing test, changed or dropped any of its original statements, added a `return` to it, or added a skip/xfail. Treat this as a red flag, not just a fail. Adding tests, adding assertions to existing tests and editing imports or helpers is *not* tampering (grading uses a pristine copy of the visible tests, so these edits can't help); those files are listed in `tests_added_to`.
 - **med s** and **med +/-** are wall-clock time and diff size. Large diffs on small tasks usually mean collateral edits.
 - **cont** is the median number of "continue" follow-ups per run (manual mode only, 0 for CLI agents). A pass that needed continues is still a pass, but a higher number means the agent needed more pushing to finish.
 - **gave** is the number of runs you abandoned with `g`. Those runs are graded as they stood.

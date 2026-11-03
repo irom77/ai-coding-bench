@@ -6,19 +6,21 @@ then rerun `python3 report.py --md` and commit this file together with `results/
 
 | agent | harness / model / settings | pass | 95% CI | tests% | median s | median diff | added tests | tamper | timeouts | continues | cost | infra excl. | last run |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| **claude-code-opus-5.5** | Claude Code 2.1.317, claude-opus-5-5, default effort, personal ~/.claude config | 18/18 (100%) | 82%–100% | 100% | 34 | 57 | 15/18 | 0 | 0 | 0 | $5.36 | 0 | 2026-11-03 |
-| **codex-gpt-6-luna** | Codex CLI 0.164.0, gpt-6-luna, reasoning medium, personal ~/.codex config | 18/18 (100%) | 82%–100% | 100% | 26 | 19 | 0/18 | 0 | 0 | 0 | - | 0 | 2026-11-03 |
+| **claude-code-opus-5.5** | Claude Code 2.1.317, claude-opus-5-5, default effort, personal ~/.claude config, pytest on PATH | 18/18 (100%) | 82%–100% | 100% | 36 | 62 | 15/18 | 0 | 0 | 0 | $4.59 | 0 | 2026-11-03 |
+| **gemini-cli-4-argon** | Gemini CLI 0.66.0, gemini-4-argon, yolo, personal ~/.gemini config, pytest on PATH | 18/18 (100%) | 82%–100% | 100% | 63 | 60 | 15/18 | 0 | 0 | 0 | - | 0 | 2026-11-03 |
+| **codex-gpt-6-luna** | Codex CLI 0.164.0, gpt-6-luna, reasoning medium, personal ~/.codex config, pytest on PATH | 16/18 (89%) | 67%–97% | 94% | 39 | 14 | 1/18 | 0 | 0 | 0 | - | 0 | 2026-11-03 |
+| **gemini-cli-3.8-flash** | Gemini CLI 0.66.0, gemini-3.8-flash, yolo, personal ~/.gemini config, pytest on PATH | 16/18 (89%) | 67%–97% | 96% | 243 | 98 | 12/18 | 0 | 3 | 0 | - | 0 | 2026-11-03 |
 
 ## Passes per task
 
-| task | claude-code-opus-5.5 | codex-gpt-6-luna |
-|---|---|---|
-| 01_pagination | 3/3 | 3/3 |
-| 02_parse_duration | 3/3 | 3/3 |
-| 03_cli_dry_run | 3/3 | 3/3 |
-| 04_config_merge | 3/3 | 3/3 |
-| 05_no_test_edits | 3/3 | 3/3 |
-| 06_token_bucket | 3/3 | 3/3 |
+| task | claude-code-opus-5.5 | codex-gpt-6-luna | gemini-cli-3.8-flash | gemini-cli-4-argon |
+|---|---|---|---|---|
+| 01_pagination | 3/3 | 3/3 | 3/3 | 3/3 |
+| 02_parse_duration | 3/3 | 3/3 | 2/3 | 3/3 |
+| 03_cli_dry_run | 3/3 | 3/3 | 3/3 | 3/3 |
+| 04_config_merge | 3/3 | 1/3 | 2/3 | 3/3 |
+| 05_no_test_edits | 3/3 | 3/3 | 3/3 | 3/3 |
+| 06_token_bucket | 3/3 | 3/3 | 3/3 | 3/3 |
 
 ## How to read it
 

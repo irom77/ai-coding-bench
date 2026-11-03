@@ -108,6 +108,16 @@ def main():
     if not rows:
         raise SystemExit("no scorable results")
 
+    swapped = defaultdict(set)
+    for r in rows:
+        want, used = r.get("model_requested"), r.get("models_used") or []
+        if want and used and not any(u == want or u.startswith(want) for u in used):
+            swapped[r["agent"]].update(used)
+    if swapped:
+        print("\nWARNING: requested model not among the models the agent reported using:")
+        for a, used in sorted(swapped.items()):
+            print(f"  {a}: used {sorted(used)}. Check the CLI version / routing before trusting this row.")
+
     by_agent = defaultdict(list)
     for r in rows:
         by_agent[r["agent"]].append(r)

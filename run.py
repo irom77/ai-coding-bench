@@ -8,6 +8,7 @@ Example:
     python3 report.py
 """
 import argparse
+import ast
 import difflib
 import json
 import os
@@ -60,10 +61,42 @@ def snapshot_paths(work, rel_paths):
 SKIP_RE = re.compile(rb"\b(skip|skipif|xfail|importorskip)\b")
 
 
+def _test_functions(src):
+    """{qualified name: (signature+decorators dump, [statement dumps])} for every test_* function."""
+    out = {}
+    def walk(nodes, prefix):
+        for n in nodes:
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name.startswith("test"):
+                sig = ast.dump(n.args) + "|" + "|".join(ast.dump(d) for d in n.decorator_list)
+                out[prefix + n.name] = (sig, [ast.dump(st) for st in n.body])
+            elif isinstance(n, ast.ClassDef):
+                walk(n.body, prefix + n.name + ".")
+    walk(ast.parse(src).body, "")
+    return out
+
+
+def _kept(old, new):
+    """An existing test is intact if its signature/decorators are unchanged and every original
+    statement is still there, in order (new assertions may be added in between or after)."""
+    if new is None or old[0] != new[0]:
+        return False
+    if any("Return(" in st for st in new[1] if st not in old[1]):
+        return False  # an added `return` would stop the original assertions from running
+    it = iter(new[1])
+    return all(any(st == x for x in it) for st in old[1])
+
+
+def _line_tampered(old, new):
+    """Fallback for non-Python files: any removed or changed line."""
+    ops = difflib.SequenceMatcher(None, old.splitlines(), new.splitlines(), autojunk=False).get_opcodes()
+    return any(op in ("replace", "delete") for op, *_ in ops)
+
+
 def check_protected(before, after):
-    """Tampering = an existing protected file was deleted, or any of its lines were removed or changed,
-    or an added line skips/xfails tests. Pure additions (new tests appended, new test files) are
-    allowed and only reported, since grading uses a pristine copy of the visible tests anyway."""
+    """Tampering = an existing protected file was deleted; an existing test_* function was removed,
+    re-signatured/re-decorated, or lost or changed any of its original statements; or a skip/xfail
+    was added anywhere. Adding tests, adding assertions to existing tests, and editing imports or
+    helpers is allowed and only reported, since grading uses a pristine copy of the visible tests."""
     tampered, added_to = [], []
     for path in sorted(before.keys() | after.keys()):
         old, new = before.get(path), after.get(path)
@@ -72,21 +105,23 @@ def check_protected(before, after):
         if new is None:
             tampered.append(path)
             continue
-        old_lines = old.splitlines() if old is not None else []
-        added = []
-        for op, i1, i2, j1, j2 in difflib.SequenceMatcher(None, old_lines, new.splitlines(),
-                                                           autojunk=False).get_opcodes():
-            if op in ("replace", "delete"):
-                break
-            if op == "insert":
-                added += new.splitlines()[j1:j2]
-        else:
-            if any(SKIP_RE.search(line) for line in added):
-                tampered.append(path)
-            else:
-                added_to.append(path)
+        old_lines = set(old.splitlines()) if old is not None else set()
+        if any(SKIP_RE.search(l) for l in new.splitlines() if l not in old_lines):
+            tampered.append(path)
             continue
-        tampered.append(path)
+        if old is None:
+            added_to.append(path)
+            continue
+        if path.endswith(".py"):
+            try:
+                old_t = _test_functions(old)
+                new_t = _test_functions(new)
+                bad = not all(_kept(body, new_t.get(name)) for name, body in old_t.items())
+            except SyntaxError:
+                bad = True  # the agent left a protected test file unparseable
+        else:
+            bad = _line_tampered(old, new)
+        (tampered if bad else added_to).append(path)
     return tampered, added_to
 
 
@@ -104,7 +139,10 @@ def run_agent(cmd_tpl, prompt, task_name, work, log_path, timeout):
     cmd = (cmd_tpl.replace("{prompt_file}", shlex.quote(str(prompt_file)))
                   .replace("{workdir}", shlex.quote(str(work)))
                   .replace("{prompt}", shlex.quote(prompt)))
-    env = {**os.environ, "BENCH_PROMPT": prompt, "BENCH_TASK": task_name}
+    # Every agent gets the same toolchain: the grader's Python (with pytest) first on PATH, so
+    # `pytest` / `python3 -m pytest` work for everyone and no agent wastes its run hunting for them.
+    env = {**os.environ, "BENCH_PROMPT": prompt, "BENCH_TASK": task_name,
+           "PATH": str(Path(GRADER_PY).parent) + os.pathsep + os.environ.get("PATH", "")}
     t0 = time.monotonic()
     with open(log_path, "w") as log:
         log.write(f"$ {cmd}\n\n")
@@ -181,6 +219,45 @@ def read_cost(log_path):
     return round(float(hits[-1]), 4) if hits else None
 
 
+def read_models(log_path):
+    """Best effort: models the agent says it used, from its JSON usage stats
+    (Gemini CLI stats.models, Claude Code modelUsage, Codex thread/turn events). [] if unknown."""
+    try:
+        text = Path(log_path).read_text(errors="replace")
+    except OSError:
+        return []
+    found = set()
+    for line in text.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        found |= set(((d.get("stats") or {}).get("models") or {}).keys())
+        found |= set((d.get("modelUsage") or {}).keys())
+        if isinstance(d.get("model"), str):
+            found.add(d["model"])
+    if not found:  # pretty-printed JSON (gemini -o json), possibly with log text around it
+        dec, i = json.JSONDecoder(), text.find("\n{")
+        while i >= 0:
+            try:
+                d, _ = dec.raw_decode(text, i + 1)
+                if isinstance(d, dict):
+                    found |= set(((d.get("stats") or {}).get("models") or {}).keys())
+            except ValueError:
+                pass
+            i = text.find("\n{", i + 1)
+    return sorted(found)
+
+
+def requested_model(cmd):
+    """The model named with -m/--model in an agent command, if any."""
+    m = re.search(r"(?:^|\s)(?:-m|--model)[ =]([\w.\-]+)", cmd or "")
+    return m.group(1) if m else None
+
+
 def diff_stats(work):
     git(work, "add", "-A")
     added = removed = 0
@@ -201,13 +278,16 @@ def ensure_pytest():
     .venv/ inside the kit once and installs pytest there (works on distros that block system pip)."""
     if subprocess.run([sys.executable, "-c", "import pytest"], capture_output=True).returncode == 0:
         return sys.executable
-    venv_py = ROOT / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    # Outside the kit on purpose: its bin/ goes on the agents' PATH, which must not reveal where
+    # the kit (and its hidden tests) lives.
+    venv_dir = Path.home() / ".cache" / "ai-coding-bench" / "venv"
+    venv_py = venv_dir / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     if not venv_py.exists() or subprocess.run([str(venv_py), "-c", "import pytest"],
                                               capture_output=True).returncode != 0:
-        print(f"pytest not found for {sys.executable}; installing it into {ROOT / '.venv'} (one time)...",
+        print(f"pytest not found for {sys.executable}; installing it into {venv_dir} (one time)...",
               flush=True)
         try:
-            subprocess.run([sys.executable, "-m", "venv", str(ROOT / ".venv")], check=True)
+            subprocess.run([sys.executable, "-m", "venv", str(venv_dir)], check=True)
             subprocess.run([str(venv_py), "-m", "pip", "install", "-q", "pytest"], check=True)
         except (subprocess.CalledProcessError, OSError) as e:
             sys.exit(f"could not set up pytest automatically ({e}). Install it yourself: "
@@ -330,6 +410,7 @@ def main():
             "score": g["score"], "tests_passed": g["passed"], "tests_total": g["tests"],
             "tampered_files": tampered, "tests_added_to": tests_added_to, "timed_out": timed_out,
             "exit_code": rc, "infra_error": infra_error, "seconds": secs, "cost_usd": read_cost(run_dir / "agent.log"),
+            "model_requested": requested_model(args.agent), "models_used": read_models(run_dir / "agent.log"),
             **diff, "workdir": str(work), "log": str(run_dir / "agent.log"),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
