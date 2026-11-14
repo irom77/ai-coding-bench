@@ -6,7 +6,7 @@ A small, honest benchmark for comparing AI coding assistants on the same tasks u
 It works with any agent you can run from a shell command, and with IDE/chat agents driven by hand.
 **Current results: [LEADERBOARD.md](LEADERBOARD.md)** · **Next: harder tasks, see [TODO.md](TODO.md).**
 
-Requires Python 3.9+ and git. pytest is set up automatically in `~/.cache/ai-coding-bench/`: agents get their own read-only venv with pytest first on `PATH`, so all of them have the same toolchain and `pytest` just works. The grader uses your Python if it already has pytest, otherwise a separate read-only venv that agents never see on `PATH`. Its pytest install is fingerprinted, and the run aborts if anything changes it.
+Requires Python 3.9+ and git. pytest is set up automatically in `~/.cache/ai-coding-bench/`: agents get their own read-only venv with pytest first on `PATH`, so all of them have the same toolchain and `pytest` just works. The grader always uses its own separate read-only venv that agents never see on `PATH`. Its whole `site-packages` is fingerprinted before and after every grade, and the run aborts if anything changes it.
 
 ## How it works
 
@@ -23,7 +23,7 @@ A run **passes** only if every hidden test passes and no protected file was tamp
 ## Quick start
 
 ```bash
-./selftest.sh          # sanity check: oracle 6/6, noop 0/6, cheater flagged, manual mode wiring
+./selftest.sh          # sanity check: tamper-rule cases, oracle 6/6, noop 0/6, cheater flagged, manual mode wiring
 
 # The four setups on the leaderboard, 3 repeats per task (18 runs each)
 python3 run.py --name claude-code-opus-5.5 --note "Claude Code <version>, claude-opus-5-5, default effort" \
@@ -153,6 +153,10 @@ Aim for a mix of roughly 1/3 easy, 1/3 medium and 1/3 hard.
 - Keep everything else identical between models: harness, system prompt, tools, timeout.
 - This repo is public, so the six bundled tasks, their hidden tests and solutions may end up in model training data. Use them to check the setup; for a real ranking use your own tasks kept in a private repo or folder.
 - Hidden tests live in this folder. An agent with full disk access could go looking for them, so for strict isolation run agents in a container or VM and keep the kit outside it.
-- The grader is hardened against common tricks. It runs isolated Python (`-I`) from a fresh temp dir, so a planted `pytest.py`, `sitecustomize.py` or fake `junit.xml` has no effect. Its pytest install is separate from the agents' venv, read-only, and fingerprinted before every grade, so a `pip install` by an agent can't change grading. The benchmark aborts if it changes. The grader also kills the agent's whole process session before checking and grading, so leftover background jobs can't change files afterwards. It still trusts the code under test: a solution that patches pytest when imported, or a process that escapes with `setsid`, can only be stopped by running agents in a container or VM.
+- The grader is hardened against common tricks. It runs isolated Python (`-I`) from a fresh temp dir, so a planted `pytest.py`, `sitecustomize.py` or fake `junit.xml` has no effect. Its pytest install is separate from the agents' venv, read-only, runs with plugin auto-loading off, and its whole `site-packages` is fingerprinted before and after every grade, so a `pip install` or a patched dependency can't change grading. The benchmark aborts if it changes. The grader also kills the agent's whole process session before checking and grading, so leftover background jobs can't change files afterwards. It still trusts the code under test: a solution that patches pytest when imported, or a process that escapes with `setsid`, can only be stopped by running agents in a container or VM.
 - Parallel runs (`--jobs` > 1) all run as your user, so a misbehaving agent could read or change another run's files while it is being graded. For a strict run, use `--jobs 1` or, better, run each agent in a container or as a separate user.
 - Tasks are Python/pytest. For other languages, keep the same layout and change the grading command in `grade()` in `run.py`.
+
+## References
+
+- [YouTube video](https://youtu.be/fDx_C1TF7f8?si=pzQuidIug9yyESyQ)
